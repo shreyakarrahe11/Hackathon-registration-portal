@@ -1,0 +1,67 @@
+import React from 'react';
+import ReactDOM from 'react-dom/client';
+import App from './App';
+import { supabase } from './services/supabaseService';
+
+console.log("INDEX: App Mounting...");
+console.log("INDEX: URL at mount:", window.location.href);
+
+// Pre-check for OAuth 'code' or 'access_token' in the URL (Search Params or Hash)
+// This runs BEFORE React or Router touches the DOM
+const preAuthCheck = async () => {
+  // Check Search Params (PKCE Standard)
+  const urlParams = new URLSearchParams(window.location.search);
+  const code = urlParams.get('code');
+  const error = urlParams.get('error');
+
+  if (error) {
+    console.error("INDEX: Optimization Error found in URL:", error);
+    alert(`Login Error: ${urlParams.get('error_description')}`);
+  }
+
+  if (code) {
+    console.log("INDEX: OAuth Code detected! Exchanging...");
+    // Suppress Router until exchanged? No, Supabase SDK handles this async.
+    // But we want to ensure we log it.
+    const { data, error } = await supabase.auth.getSession(); // Triggers exchange
+    console.log("INDEX: Exchange Result:", data.session ? "SUCCESS" : "FAIL", error || "");
+
+    // Clean URL to prevent loop if desired, but HashRouter usually ignores search params
+    if (data.session) {
+      console.log("INDEX: Session Established. Redirecting to clean URL...");
+      // Optional: window.history.replaceState({}, '', '/'); 
+    }
+  } else {
+    // Validation for Hash Fragment (Legacy/Implicit)
+    if (window.location.hash && window.location.hash.includes('access_token')) {
+      console.log("INDEX: Legacy Hash Token detected.");
+      const { data, error } = await supabase.auth.getSession();
+      console.log("INDEX: Hash Exchange Result:", data.session ? "SUCCESS" : "FAIL", error || "");
+    }
+  }
+};
+
+// Execute pre-check and ONLY THEN render
+(async () => {
+  try {
+    const rootElement = document.getElementById('root');
+    if (!rootElement) throw new Error("Root not found");
+
+    // Show temporary loading state
+    rootElement.innerHTML = '<div style="height:100vh;display:flex;align-items:center;justify-content:center;background:#000;color:#fff;font-family:monospace">INNOVEX SYSTEM: INITIALIZING SECURITY PROTOCOLS...</div>';
+
+    await preAuthCheck();
+
+    // Clear loading state
+    rootElement.innerHTML = '';
+
+    const root = ReactDOM.createRoot(rootElement);
+    root.render(
+      <React.StrictMode>
+        <App />
+      </React.StrictMode>
+    );
+  } catch (err) {
+    console.error("INDEX: Fatal Init Error", err);
+  }
+})();

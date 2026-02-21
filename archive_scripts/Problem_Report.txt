@@ -1,0 +1,47 @@
+# Problem Report
+
+## 1. Critical Security Vulnerabilities
+
+### A. Hardcoded Secrets in Client Code
+**File**: `services/mockSupabase.ts`
+- **Issue**: The Supabase URL and Key are hardcoded directly in the file:
+  ```typescript
+  const SUPABASE_URL = 'https://lemfvausrbpdplgpkopf.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_...';
+  ```
+- **Issue**: Judge and Admin access codes are hardcoded in the `JUDGE_CODES` constant.
+  ```typescript
+  const ADMIN_CODE = 'INNOVEXA2@chairperson#';
+  ```
+- **Impact**: Any user who views the website can inspect the sources, retrieve the API key and the Admin password, and gain full administrative control over the application.
+
+### B. Insecure Database Policies (RLS)
+**File**: `schema.sql`
+- **Issue**: Policies are set to `true` for all actions (SELECT, INSERT, UPDATE, DELETE).
+  ```sql
+  create policy "Enable delete access for all users" on public.teams for delete using (true);
+  ```
+- **Impact**: Since the API key is exposed (and is likely an anon key), *anyone* can issue a command to delete the entire `teams` database or modify scores without logging in.
+
+## 2. Logic & Reliability Issues
+
+### A. Auth Bypass Fallback
+**File**: `services/mockSupabase.ts` (Lines 770-780)
+- **Issue**: In `registerStudent`, if Supabase returns an error (like Rate Limit), the code catches it and proceeds to return a "success" session object anyway.
+- **Impact**: Users might think they are registered when they are not. Data consistency is lost between the "mock" session and the database.
+
+### B. Race Conditions in Data
+- **Issue**: `createTeam` generates a random ID (`SUB-XXXXXX`) on the client side.
+- **Impact**: Low probability of collision, but generally safer to let the database handle ID generation or use UUIDs (Member table uses UUIDs, Teams uses custom text ID).
+
+## 3. Scalability Issues
+
+### A. Unoptimized Data Fetching
+**File**: `services/mockSupabase.ts` -> `getTeams`
+- **Issue**: `select('*, members(*), evaluations(*)')` loads the entire database of teams and their related data in one request.
+- **Impact**: As the number of teams grows, the Evaluator Dashboard will become extremely slow and eventually time out.
+
+## 4. Maintainability
+
+### A. Misleading Naming
+- The file `mockSupabase.ts` is named "mock" but performs real production database operations. This puts developers off guard regarding the prod-critical nature of the code inside.

@@ -1,0 +1,53 @@
+# Fixes & Recommendations
+
+## 1. Security Fixes (Priority: Critical)
+
+### A. Secure API Keys
+1.  **Action**: Remove `SUPABASE_URL` and `SUPABASE_KEY` from `services/mockSupabase.ts`.
+2.  **Action**: Use Environment Variables.
+    - Create `.env` file (not committed to git).
+    - Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_KEY`.
+    - Update code to use `import.meta.env.VITE_SUPABASE_URL`.
+
+### B. Secure Access Codes
+1.  **Action**: **NEVER** store passwords (`ADMIN_CODE`, `JUDGE_CODES`) in frontend code.
+2.  **Fix**: Move Judge/Admin authentication to Supabase Auth (e.g., Create internal users with specific roles in `auth.users`) OR store hashed codes in a database table and verify via a Supabase Edge Function / RPC.
+
+### C. Hardening RLS (Row Level Security)
+1.  **Action**: Update `schema.sql` policies.
+2.  **Fix**:
+    - **Read**: Allow public read (or authenticated read).
+    - **Insert**: Allow authenticated users to insert *their own* team.
+    - **Update/Delete**: Restrict to `admin` role or the user who owns the record.
+    ```sql
+    -- Example Policy
+    create policy "Allow delete for admins only" on public.teams
+    for delete using (auth.jwt() ->> 'role' = 'service_role'); -- or logic examining user metadata
+    ```
+
+## 2. Logic Improvements
+
+### A. Remove Insecure Fallbacks
+1.  **Action**: Remove the catch block in `registerStudent` that returns a valid session on error.
+2.  **Fix**: If registration fails, show a proper error message to the user and ask them to retry.
+
+### B. ID Generation
+1.  **Action**: Move ID generation to the database trigger or use `uuid` for the primary key of `teams`.
+
+## 3. Performance Improvements
+
+### A. Pagination
+1.  **Action**: Update `getTeams` to accept `page` and `limit` parameters.
+2.  **Code Change**:
+    ```typescript
+    .range(start, end)
+    ```
+
+## 4. Refactoring
+
+### A. Rename Service
+1.  **Action**: Rename `mockSupabase.ts` to `api.ts` or `supabaseClient.ts` to reflect it is the real API client.
+
+## 5. Type Safety
+1.  **Action**: Generate Typescript types directly from the Supabase schema to ensure `types.ts` is always in sync with the DB.
+    - Use `supabase gen types typescript`.

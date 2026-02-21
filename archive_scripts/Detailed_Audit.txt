@@ -1,0 +1,57 @@
+# Detailed Audit Report
+
+## 1. Project Overview
+- **Type**: Web Application (React + Vite + TypeScript).
+- **Purpose**: Hackathon/Event Management System (Innovex AI).
+- **Core Features**:
+  - Student Registration (Team creation, member management, PPT upload).
+  - Role-Based Access Control (Student, Evaluator, Admin).
+  - Evaluation Dashboard (Scoring teams).
+  - Admin Dashboard (Reference in App.tsx/Pages).
+- **Backend/Data**: Supabase (PostgreSQL) + Supabase Storage.
+
+## 2. File Structure Analysis
+- **`src/`**: Standard Vite structure.
+- **`config/`**: Contains configuration files (checked, likely empty or minimal based on list).
+- **`pages/`**: core UI logic. Broken down by role (`StudentLogin`, `EvaluatorDashboard`, `AdminDashboard`).
+- **`services/mockSupabase.ts`**: **CRITICAL**. Despite the name "mock", this file initializes a *real* Supabase client and handles all data interactions. It contains hardcoded logic for Problem Statements and Auth.
+- **`schema.sql`**: Defines the database schema. Tables: `teams`, `members`, `evaluations`.
+- **`types.ts`**: robust type definitions for the domain entities.
+
+## 3. Codebase Analysis
+
+### Configuration
+- **`vite.config.ts`**: Standard configuration. Loads environment variables but the code in `services/mockSupabase.ts` does not seem to utilize them for the Supabase config (hardcoded strings found).
+- **`tsconfig.json`**: configured for React/Vite (ES2022 target).
+
+### Authentication & Authorization
+- **Student Auth**:
+  - Uses `supabase.auth.signUp`.
+  - **Anomaly**: Contains a fallback mechanism (lines 770-780 in `mockSupabase.ts`) that *bypasses* auth failure if a rate limit or error occurs, granting a "mock" session. This allows login even if the backend rejects the user.
+- **Staff Auth (Evaluator/Admin)**:
+  - **Mechanism**: Hardcoded "Access Codes" in `mockSupabase.ts` (`JUDGE_CODES` object).
+  - **Risk**: These codes are bundled with the client-side code, meaning any user can extract the Admin/Judge passwords by inspecting the JS source.
+
+### Data Access (Service Layer)
+- **`services/mockSupabase.ts`**:
+  - acts as the DAL (Data Access Layer).
+  - **`getTeams`**: Fetches *all* teams. Potential scalability issue.
+  - **`createTeam`**: Transaction-like logic (Insert Team -> Insert Members -> Upload file).
+  - **File Upload**: Tries to upload to 'documents' bucket, falls back to manual URL on failure.
+
+### Database Schema (schema.sql)
+- **RLS (Row Level Security)**:
+  - Enabled for all tables (`alter table ... enable row level security`).
+  - **Policy**: `create policy ... using (true)`.
+  - **Implication**: RLS is effectively *disabled*. **Anyone** with the anon key can Read/Write/Delete/Update *any* data in the `teams`, `members`, and `evaluations` tables. Verification: `create policy "Enable delete access for all users" on public.teams for delete using (true);`.
+
+## 4. UI/UX
+- **Styling**: Tailwind CSS (inferred from class usage).
+- **Components**: Functional, using standard React Hooks (`useState`, `useEffect`).
+- **Routing**: `react-router-dom` v6+. Protected Route wrappers (`StudentRoute`, `EvaluatorRoute`, `AdminRoute`) handle client-side redirection.
+
+## 5. Security Verdict
+- **Critical Failures**:
+  - Hardcoded API credentials in source.
+  - Hardcoded Admin/Judge passwords in client source.
+  - Open Database Access (RLS set to public for all operations).

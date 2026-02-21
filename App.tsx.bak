@@ -1,0 +1,278 @@
+import React, { useState, useEffect } from 'react';
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import Layout from './components/Layout';
+import Gateway from './pages/Gateway';
+import StudentLogin from './pages/StudentLogin';
+import LandingPage from './pages/LandingPage';
+import Registration from './pages/Registration';
+import Login from './pages/Login';
+import StatusCheck from './pages/StatusCheck';
+import ProblemStatements from './pages/ProblemStatements';
+import EvaluatorDashboard from './pages/EvaluatorDashboard';
+import AdminDashboard from './pages/AdminDashboard';
+import ForgotPassword from './pages/ForgotPassword';
+import ResetPassword from './pages/ResetPassword';
+import AuthCallback from './pages/AuthCallback';
+import AccessCodeEntry from './pages/AccessCodeEntry'; // Helper page for secure role activation
+import { UserSession, UserRole } from './types';
+
+const App: React.FC = () => {
+  const [user, setUser] = useState<UserSession | null>(null);
+  const [authLoading, setAuthLoading] = useState(true); // CRITICAL: Track auth hydration state
+
+  // Persistence for user session (Real Supabase Auth)
+  useEffect(() => {
+    // 1. Check initial session
+    const checkSession = async () => {
+      console.log("APP: Checking Session... URL:", window.location.href);
+      try {
+        const { supabase } = await import('./services/supabaseService');
+        const { data: { session }, error } = await supabase.auth.getSession();
+
+        console.log("APP: Session Result:", session ? "FOUND" : "NULL", error || "No Error");
+
+        if (session?.user) {
+          // Fetch full profile from 'users' table
+          const { getCurrentUserProfile } = await import('./services/supabaseService');
+          const profile = await getCurrentUserProfile();
+
+          if (profile) {
+            console.log("APP: Profile Found:", profile.role);
+            // IMPORTANT: Normalize role to uppercase to match UserRole enum
+            const normalizedRole = (profile.role || 'student').toUpperCase() as UserRole;
+
+            // Use panel from database (set by access code activation)
+            const assignedPanel = profile.panel || undefined;
+
+            setUser({
+              ...profile,
+              role: normalizedRole,
+              panel: assignedPanel
+            });
+          } else {
+            // Session exists but no profile - new OAuth user
+            console.log("APP: Session found but no profile - setting as new student");
+            setUser({
+              id: session.user.id,
+              email: session.user.email!,
+              name: session.user.user_metadata?.full_name || 'New Student',
+              role: UserRole.STUDENT,
+              requiresRegistration: true
+            } as UserSession);
+          }
+        } else {
+          console.log("APP: No Session found.");
+          setUser(null);
+        }
+      } catch (err) {
+        console.error("APP: Session check error:", err);
+        setUser(null);
+      } finally {
+        // CRITICAL: Mark auth hydration as complete
+        setAuthLoading(false);
+      }
+    };
+
+    checkSession();
+
+    // 2. Listen for changes
+    import('./services/supabaseService').then(({ supabase }) => {
+      console.log("APP: Attaching Auth Listener");
+      const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+        console.log("APP: Auth Event:", event, session?.user?.email);
+
+        if (session?.user) {
+          const { getCurrentUserProfile } = await import('./services/supabaseService');
+          const profile = await getCurrentUserProfile();
+          if (profile) {
+            // IMPORTANT: Normalize role to uppercase to match UserRole enum
+            const normalizedRole = (profile.role || 'student').toUpperCase() as UserRole;
+
+            let assignedPanel: 'A' | 'B' | 'C' | 'D' | undefined = undefined;
+            if (normalizedRole === UserRole.EVALUATOR) {
+              const lowerEmail = profile.email?.toLowerCase() || '';
+              if (lowerEmail.includes('pranay')) assignedPanel = 'A';
+              else if (lowerEmail.includes('ketan')) assignedPanel = 'B';
+              else if (lowerEmail.includes('vibha')) assignedPanel = 'A';
+              else if (lowerEmail.includes('madhuri')) assignedPanel = 'B';
+            }
+
+            setUser({ ...profile, role: normalizedRole, panel: assignedPanel });
+          } else {
+            // Handle "No Profile" case reactively too
+            const isAdmin = session.user.email === 'admin@innovex.ai';
+            console.warn("APP: Auth Change - Profile missing. Fallback role assignment. Admin?", isAdmin);
+
+            // For new Google OAuth users without a profile, set them as STUDENT
+            setUser({
+              id: session.user.id,
+              email: session.user.email!,
+              name: session.user.user_metadata?.full_name || (isAdmin ? "Admin User" : "New Student"),
+              role: UserRole.STUDENT,  // Always default new users to STUDENT
+              requiresRegistration: !isAdmin  // Flag for routing
+            } as UserSession);
+          }
+        } else {
+          setUser(null);
+        }
+      });
+      return () => subscription.unsubscribe();
+    });
+  }, []);
+
+  const handleSetUser = (u: UserSession) => {
+    // This is mainly called by Login pages after they verify credentials.
+    // They should ideally also ensure the profile is fetched.
+    setUser(u);
+  };
+
+  const handleLogout = async () => {
+    // Force UI feedback immediately
+    console.log("LOGOUT: Initiated");
+
+    // Timeout Promise (2 seconds max)
+    const timeout = new Promise((resolve) => setTimeout(() => resolve('timeout'), 2000));
+
+    // Auth Promise
+    const authSignOut = async () => {
+      const { supabase } = await import('./services/supabaseService');
+      await supabase.auth.signOut();
+      return 'done';
+    };
+
+    // Race
+    await Promise.race([authSignOut(), timeout]);
+
+    // Force Cleanup
+    setUser(null);
+    localStorage.clear(); // Clear any persisted state if any
+
+    // Force Reload to clear any stuck module state
+    window.location.href = '/';
+  };
+
+  // Protected Route Wrappers - WAIT for auth hydration before redirecting
+  const EvaluatorRoute = ({ children }: { children: React.ReactElement }) => {
+    // CRITICAL: Don't redirect while auth is still loading
+    if (authLoading) return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin text-4xl">⟳</div></div>;
+    const userRole = user?.role?.toString().toUpperCase();
+    if (!user || userRole !== 'EVALUATOR') return <Navigate to="/evaluator/login" replace />;
+    return children;
+  };
+
+  const AdminRoute = ({ children }: { children: React.ReactElement }) => {
+    if (authLoading) return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin text-4xl">⟳</div></div>;
+    const userRole = user?.role?.toString().toUpperCase();
+    if (!user || userRole !== 'ADMIN') return <Navigate to="/admin/login" replace />;
+    return children;
+  };
+
+  const StudentRoute = ({ children }: { children: React.ReactElement }) => {
+    if (authLoading) return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin text-4xl">⟳</div></div>;
+    const userRole = user?.role?.toString().toUpperCase();
+    if (!user || userRole !== 'STUDENT') return <Navigate to="/student/login" replace />;
+    return children;
+  };
+
+  return (
+    <Router>
+      <Layout user={user} logout={handleLogout}>
+        <Routes>
+          {/* Public Gateway */}
+          <Route path="/" element={user ? (
+            user.requiresRegistration ? (
+              <Navigate to="/student/register" replace />
+            ) : (
+              <Navigate to={user.role === UserRole.STUDENT ? "/student/home" : (user.role === UserRole.ADMIN ? "/admin" : "/evaluator")} replace />
+            )
+          ) : <Gateway />} />
+
+          {/* Auth Routes */}
+          {/* Removed auto-redirect here to let StudentLogin handle 'Home' vs 'Register' logic */}
+          <Route path="/student/login" element={<StudentLogin setUser={handleSetUser} logout={handleLogout} />} />
+
+          {/* Distinct Login Routes */}
+          <Route
+            path="/admin/login"
+            element={user?.role === UserRole.ADMIN ? <Navigate to="/admin" /> : <Login setUser={handleSetUser} requiredRole={UserRole.ADMIN} logout={handleLogout} />}
+          />
+          <Route
+            path="/evaluator/login"
+            element={user?.role === UserRole.EVALUATOR ? <Navigate to="/evaluator" /> : <Login setUser={handleSetUser} requiredRole={UserRole.EVALUATOR} logout={handleLogout} />}
+          />
+
+          {/* Password Reset Routes (Public) */}
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
+
+          {/* OAuth Callback Route (CRITICAL for Google sign-in) */}
+          <Route path="/auth/callback" element={<AuthCallback />} />
+
+          {/* Secure Access Code Verification */}
+          <Route path="/verify-access" element={<AccessCodeEntry onSuccess={(role) => {
+            // Access code success - reload to get new role
+            window.location.href = role === 'admin' ? '/#/admin/dashboard' : '/#/evaluator/dashboard';
+            window.location.reload();
+          }} />} />
+
+          {/* Student Portal Routes */}
+          <Route
+            path="/student/home"
+            element={
+              <StudentRoute>
+                <LandingPage user={user} />
+              </StudentRoute>
+            }
+          />
+          <Route
+            path="/student/register"
+            element={
+              <StudentRoute>
+                <Registration />
+              </StudentRoute>
+            }
+          />
+          <Route
+            path="/student/status"
+            element={
+              <StudentRoute>
+                <StatusCheck />
+              </StudentRoute>
+            }
+          />
+          <Route
+            path="/student/problems"
+            element={
+              <StudentRoute>
+                <ProblemStatements />
+              </StudentRoute>
+            }
+          />
+
+          {/* Staff Routes */}
+          <Route
+            path="/evaluator"
+            element={
+              <EvaluatorRoute>
+                <EvaluatorDashboard user={user!} />
+              </EvaluatorRoute>
+            }
+          />
+
+          <Route
+            path="/admin"
+            element={
+              <AdminRoute>
+                <AdminDashboard />
+              </AdminRoute>
+            }
+          />
+
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Layout>
+    </Router>
+  );
+};
+
+export default App;

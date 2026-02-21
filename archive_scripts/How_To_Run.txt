@@ -1,0 +1,50 @@
+# How to Run Project
+
+## 1. Setup & Installation
+```bash
+npm install
+```
+
+## 2. Configuration & Authentication
+
+### Option A: Quick Start (Demo Mode)
+- **What works**: Student Login/Register (Data stored in browser), Mock Google Login.
+- **What doesn't**: Real Database Sync, Real Google Account usage.
+- **Steps**:
+    1. Do nothing. The app auto-detects missing `.env` and uses Demo Mode.
+    2. Click "**Sign in with Google (Demo Mode)**" to test the flow instantly.
+
+### Option B: Production (Real Database & Auth)
+- **What works**: Everything. User data persists in Supabase. Real Google Sign-In.
+- **Steps**:
+    1. Create a Supabase Project at [supabase.com](https://supabase.com).
+    2. Run the `schema.sql` (included in project) in Supabase SQL Editor.
+    3. Enable **Google Auth** in Supabase -> Authentication -> Providers.
+    4. **Create Storage Bucket**:
+       - Go to Storage -> New Bucket
+       - Name: `documents`
+       - Public: **YES**
+    5. Create a `.env` file in the root:
+       ```env
+       VITE_GOOGLE_CLIENT_ID=your_google_client_id
+       VITE_SUPABASE_URL=your_project_url
+       VITE_SUPABASE_ANON_KEY=your_anon_key
+       ```
+    5. Restart server: `npm run dev`
+
+## 3. Running the App
+```bash
+npm run dev
+```
+Open `http://localhost:5173`
+
+## Troubleshooting
+- **"Provider is not enabled"**: Enbale Google in Supabase -> Authentication -> Providers.
+- **"Origin not allowed" (Google Auth Error)**:
+    1. Go to Google Cloud Console > Credentials.
+    2. Edit your OAuth 2.0 Client ID.
+    3. Add to **Authorized JavaScript origins**:
+       - `http://localhost:5173`
+       - `http://localhost:3000`
+    4. Save and wait 5 minutes.
+- **"Login Failed"**: Check console. If "Popup closed", try again.
